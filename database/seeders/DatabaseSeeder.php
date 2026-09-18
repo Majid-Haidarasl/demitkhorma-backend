@@ -4,36 +4,13 @@ namespace Database\Seeders;
 
 use App\Models\Banner;
 use App\Models\Faq;
-use App\Models\User;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        $admin = User::where('username', 'majidadmin')->first()
-            ?? User::where('role', 'admin')->where('phone', '09120000000')->first();
-
-        if ($admin) {
-            $admin->fill([
-                'name' => 'مدیر',
-                'username' => 'majidadmin',
-                'phone' => '09120000000',
-                'password' => '@Majid3510@',
-                'phone_verified_at' => now(),
-            ]);
-            $admin->forceFill(['role' => 'admin'])->save();
-        } else {
-            $admin = User::create([
-                'name' => 'مدیر',
-                'username' => 'majidadmin',
-                'phone' => '09120000000',
-                'password' => '@Majid3510@',
-                'phone_verified_at' => now(),
-            ]);
-            $admin->forceFill(['role' => 'admin'])->save();
-        }
-
+        $this->call(AdminUserSeeder::class);
         $this->call(CatalogSeeder::class);
 
         if (! Banner::query()->exists()) {

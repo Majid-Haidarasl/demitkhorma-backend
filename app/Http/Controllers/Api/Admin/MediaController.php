@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\MediaFile;
 use App\Services\ActivityLogger;
+use App\Support\SafeInput;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -18,7 +19,7 @@ class MediaController extends Controller
         $files = MediaFile::with('uploader:id,username')
             ->when($request->filled('folder'), fn ($q) => $q->where('folder', $request->folder))
             ->latest()
-            ->paginate($request->integer('per_page', 24));
+            ->paginate($request->safePerPage( 24));
 
         return response()->json($files);
     }
@@ -52,7 +53,7 @@ class MediaController extends Controller
         $media = MediaFile::create([
             'path' => $path,
             'folder' => $folder,
-            'original_name' => $file->getClientOriginalName(),
+            'original_name' => SafeInput::originalFilename($file->getClientOriginalName()),
             'mime' => $file->getMimeType(),
             'size' => $file->getSize() ?: 0,
             'uploaded_by' => $request->user()?->id,

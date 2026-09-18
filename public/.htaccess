@@ -29,6 +29,7 @@
     Header set X-Frame-Options "DENY"
     Header set Referrer-Policy "strict-origin-when-cross-origin"
     Header set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Header set Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
 </IfModule>
 
 <FilesMatch "^\.">

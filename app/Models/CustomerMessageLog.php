@@ -11,6 +11,7 @@ class CustomerMessageLog extends Model
         'campaign_id',
         'user_id',
         'phone',
+        'email',
         'status',
         'error',
     ];

@@ -20,7 +20,8 @@ class OrderController extends Controller
             'user' => fn ($q) => $q->select('id', 'phone', 'name', 'first_name', 'last_name')->withCount('addresses'),
             'items',
         ])
-            ->when($request->filled('status'), fn ($q) => $q->where('status', $request->status))
+            ->when($request->boolean('attention'), fn ($q) => $q->whereIn('status', Order::ATTENTION_STATUSES))
+            ->when($request->filled('status') && ! $request->boolean('attention'), fn ($q) => $q->where('status', $request->status))
             ->when($request->filled('from'), fn ($q) => $q->whereDate('created_at', '>=', $request->from))
             ->when($request->filled('to'), fn ($q) => $q->whereDate('created_at', '<=', $request->to))
             ->when($request->filled('search'), function ($q) use ($request) {
@@ -38,7 +39,7 @@ class OrderController extends Controller
                 });
             })
             ->latest()
-            ->paginate($request->integer('per_page', 20));
+            ->paginate($request->safePerPage( 20));
 
         $orders->getCollection()->transform(function (Order $order) {
             return $order->makeVisible(['admin_notes', 'zarinpal_authority']);

@@ -1,0 +1,6 @@
+# Host-safe: do not use php_flag/Options here (they 500 on this DirectAdmin PHP).
+<IfModule mod_authz_core.c>
+  <FilesMatch "\.(?i:php\d*|phtml|phar|cgi|pl|py|exe|shtml)$">
+    Require all denied
+  </FilesMatch>
+</IfModule>

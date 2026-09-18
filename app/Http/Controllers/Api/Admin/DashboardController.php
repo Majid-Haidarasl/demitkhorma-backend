@@ -62,6 +62,7 @@ class DashboardController extends Controller
                 'low_stock_count' => Product::where('stock', '<=', $threshold)->where('is_active', true)->count(),
                 'orders_count' => Order::count(),
                 'pending_orders' => Order::where('status', 'pending')->count(),
+                'attention_orders' => Order::whereIn('status', Order::ATTENTION_STATUSES)->count(),
                 'paid_orders' => Order::where('status', 'paid')->count(),
                 'processing_orders' => Order::where('status', 'processing')->count(),
                 'shipped_orders' => Order::where('status', 'shipped')->count(),

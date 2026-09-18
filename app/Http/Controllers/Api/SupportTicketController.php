@@ -20,7 +20,7 @@ class SupportTicketController extends Controller
             ->withCount('messages')
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
-            ->paginate($request->integer('per_page', 20));
+            ->paginate($request->safePerPage( 20));
 
         $tickets->getCollection()->transform(fn (SupportTicket $t) => $t->toApiArray('customer'));
 

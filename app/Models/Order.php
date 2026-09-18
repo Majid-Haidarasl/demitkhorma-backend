@@ -24,6 +24,8 @@ class Order extends Model
 
     public const CUSTOMER_CANCELABLE = ['pending', 'paid', 'processing'];
 
+    public const ATTENTION_STATUSES = ['paid', 'processing', 'shipped'];
+
     protected function casts(): array
     {
         return ['shipping_address' => 'array'];

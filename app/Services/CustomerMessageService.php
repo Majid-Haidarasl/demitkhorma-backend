@@ -13,15 +13,22 @@ class CustomerMessageService
 {
     public const MAX_RECIPIENTS = 500;
 
-    public function __construct(private SmsService $sms) {}
+    public function __construct(
+        private SmsService $sms,
+        private ShopMailService $mail,
+    ) {}
 
-    public function recipients(string $audience, array $userIds = []): Collection
+    public function recipients(string $audience, array $userIds = [], string $channel = 'sms'): Collection
     {
         $query = User::query()
             ->where('role', 'customer')
-            ->whereNotNull('phone')
-            ->where('phone', '!=', '')
             ->withCount(['orders', 'addresses']);
+
+        if ($channel === 'email') {
+            $query->whereNotNull('email')->where('email', '!=', '');
+        } else {
+            $query->whereNotNull('phone')->where('phone', '!=', '');
+        }
 
         $users = match ($audience) {
             'all' => $query->orderByDesc('id')->get(),
@@ -39,19 +46,37 @@ class CustomerMessageService
             ]),
         };
 
-        return $users->unique('id')->values();
+        $users = $users->unique('id')->values();
+
+        if ($channel === 'email') {
+            return $users->filter(fn (User $u) => filter_var(strtolower(trim((string) $u->email)), FILTER_VALIDATE_EMAIL))->values();
+        }
+
+        return $users;
     }
 
-    public function send(string $audience, string $message, array $userIds, ?int $adminId): CustomerMessageCampaign
-    {
-        $recipients = $this->recipients($audience, $userIds);
+    public function send(
+        string $audience,
+        string $message,
+        array $userIds,
+        ?int $adminId,
+        string $channel = 'sms',
+        ?string $subject = null,
+    ): CustomerMessageCampaign {
+        $channel = $channel === 'email' ? 'email' : 'sms';
+        $subject = $channel === 'email'
+            ? (trim((string) $subject) ?: 'پیام از دمیت خرما')
+            : null;
+
+        $recipients = $this->recipients($audience, $userIds, $channel);
 
         if ($recipients->isEmpty()) {
+            $need = $channel === 'email' ? 'ایمیل' : 'شماره موبایل';
             throw ValidationException::withMessages([
                 ($audience === 'selected' ? 'user_ids' : 'audience') => [
                     $audience === 'selected'
-                        ? 'حداقل یک مشتری با شماره موبایل انتخاب کنید.'
-                        : 'با این فیلتر مخاطبی یافت نشد.',
+                        ? "حداقل یک مشتری با {$need} انتخاب کنید."
+                        : "با این فیلتر مخاطبی با {$need} یافت نشد.",
                 ],
             ]);
         }
@@ -64,6 +89,8 @@ class CustomerMessageService
 
         $campaign = CustomerMessageCampaign::create([
             'audience' => $audience,
+            'channel' => $channel,
+            'subject' => $subject,
             'message' => $message,
             'recipients_count' => $recipients->count(),
             'sent_count' => 0,
@@ -75,15 +102,22 @@ class CustomerMessageService
         $failed = 0;
 
         foreach ($recipients as $user) {
-            $phone = OtpService::normalizePhone((string) $user->phone);
+            $phone = $user->phone ? OtpService::normalizePhone((string) $user->phone) : '';
+            $email = strtolower(trim((string) $user->email));
             $body = $this->personalize($message, $user);
 
             try {
-                $this->sms->sendText($phone, $body);
+                if ($channel === 'email') {
+                    $this->mail->sendCustomerMessage($email, $subject, $body);
+                } else {
+                    $this->sms->sendText($phone, $body);
+                }
+
                 CustomerMessageLog::create([
                     'campaign_id' => $campaign->id,
                     'user_id' => $user->id,
                     'phone' => $phone,
+                    'email' => $email ?: null,
                     'status' => 'sent',
                 ]);
                 $sent++;
@@ -92,6 +126,7 @@ class CustomerMessageService
                     'campaign_id' => $campaign->id,
                     'user_id' => $user->id,
                     'phone' => $phone,
+                    'email' => $email ?: null,
                     'status' => 'failed',
                     'error' => mb_substr($e->getMessage(), 0, 240),
                 ]);
@@ -104,8 +139,9 @@ class CustomerMessageService
             'failed_count' => $failed,
         ]);
 
-        ActivityLogger::log('customer.sms.sent', $campaign, [
+        ActivityLogger::log('customer.message.sent', $campaign, [
             'audience' => $audience,
+            'channel' => $channel,
             'sent' => $sent,
             'failed' => $failed,
         ]);
@@ -122,6 +158,7 @@ class CustomerMessageService
             '{first_name}' => $first,
             '{name}' => $full,
             '{phone}' => (string) $user->phone,
+            '{email}' => (string) $user->email,
         ]);
     }
 

@@ -17,7 +17,7 @@ class ActivityLogController extends Controller
                 $q->where('action', 'like', "%{$s}%");
             })
             ->latest()
-            ->paginate($request->integer('per_page', 30));
+            ->paginate($request->safePerPage( 30));
 
         return response()->json($logs);
     }

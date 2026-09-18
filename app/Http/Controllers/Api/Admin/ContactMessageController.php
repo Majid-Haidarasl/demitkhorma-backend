@@ -24,7 +24,7 @@ class ContactMessageController extends Controller
                 });
             })
             ->latest()
-            ->paginate($request->integer('per_page', 20));
+            ->paginate($request->safePerPage( 20));
 
         return response()->json($messages);
     }

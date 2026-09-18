@@ -39,6 +39,11 @@ return [
         'url' => env('FRONTEND_URL', 'http://localhost:5173'),
     ],
 
+    'otp' => [
+        // email | sms | both — SMS stays off until the provider is ready.
+        'channel' => env('OTP_CHANNEL', 'email'),
+    ],
+
     'sms' => [
         'driver' => env('SMS_DRIVER', 'log'),
         'kavenegar' => [

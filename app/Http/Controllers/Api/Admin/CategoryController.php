@@ -60,8 +60,8 @@ class CategoryController extends Controller
         return $request->validate([
             'name_fa' => ['required', 'string', 'max:255'],
             'slug' => ['nullable', 'string', 'max:255', $slugRule],
-            'description' => ['nullable', 'string'],
-            'image' => ['nullable', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:2000'],
+            'image' => ['nullable', 'string', 'max:255', 'regex:/^(?!.*\\.\\.)[A-Za-z0-9_\\/-]+\\.(jpe?g|png|webp|gif)$/i'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
         ]);
     }

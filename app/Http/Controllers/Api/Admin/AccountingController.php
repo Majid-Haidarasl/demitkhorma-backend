@@ -37,7 +37,7 @@ class AccountingController extends Controller
             ->when($request->filled('product_id'), fn ($q) => $q->where('product_id', $request->integer('product_id')))
             ->latest('purchased_at')
             ->latest('id')
-            ->paginate($request->integer('per_page', 20));
+            ->paginate($request->safePerPage( 20));
 
         return response()->json($rows);
     }
@@ -88,7 +88,7 @@ class AccountingController extends Controller
             ->when($request->filled('category'), fn ($q) => $q->where('category', $request->string('category')))
             ->latest('spent_at')
             ->latest('id')
-            ->paginate($request->integer('per_page', 20));
+            ->paginate($request->safePerPage( 20));
 
         return response()->json($rows);
     }

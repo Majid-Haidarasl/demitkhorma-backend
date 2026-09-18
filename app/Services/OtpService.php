@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\OtpCode;
+use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -18,9 +19,56 @@ class OtpService
 
     private const MAX_ATTEMPTS = 5;
 
-    public function __construct(private SmsService $sms) {}
+    public function __construct(
+        private SmsService $sms,
+        private ShopMailService $mail,
+    ) {}
 
-    public function send(string $phone): void
+    public function rememberEmail(string $phone, ?string $email): void
+    {
+        $email = strtolower(trim((string) $email));
+        if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return;
+        }
+
+        Cache::put($this->emailKey($phone), $email, now()->addMinutes(15));
+    }
+
+    public function pullEmail(string $phone): ?string
+    {
+        $email = Cache::get($this->emailKey($phone));
+
+        return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : null;
+    }
+
+    public function forgetEmail(string $phone): void
+    {
+        Cache::forget($this->emailKey($phone));
+    }
+
+    public static function channel(): string
+    {
+        $channel = strtolower((string) config('services.otp.channel', 'email'));
+
+        return in_array($channel, ['email', 'sms', 'both'], true) ? $channel : 'email';
+    }
+
+    public static function sendsSms(): bool
+    {
+        return self::channel() !== 'email';
+    }
+
+    public static function sendsEmail(): bool
+    {
+        return self::channel() !== 'sms';
+    }
+
+    public static function requiresEmail(): bool
+    {
+        return self::channel() === 'email';
+    }
+
+    public function send(string $phone, ?string $email = null, string $purpose = 'ورود / ثبت‌نام'): bool
     {
         $existing = OtpCode::query()->where('phone', $phone)->latest()->first();
 
@@ -45,34 +93,78 @@ class OtpService
             'expires_at' => now()->addSeconds(self::TTL_SECONDS),
         ]);
 
-        if (! app()->isProduction()) {
+        if (app()->isLocal()) {
             $line = "[OTP] {$phone} => {$code}";
             Log::info($line);
             error_log($line);
             file_put_contents('php://stderr', $line.PHP_EOL, FILE_APPEND);
         }
 
-        try {
-            $this->sms->sendOtp($phone, $code);
-        } catch (\Throwable $e) {
-            Log::error('OTP SMS send failed', [
-                'phone' => $phone,
-                'error' => $e->getMessage(),
-            ]);
+        $isMobile = (bool) preg_match('/^09\d{9}$/', $phone);
+        $email = $this->normalizeEmail($email) ?? $this->resolveEmail($phone);
+        $emailed = false;
+        $smsSent = false;
 
-            // Local/dev: keep OTP and log the code so flows can be tested without SMS provider.
-            if (app()->isLocal()) {
-                Log::warning("LOCAL OTP for {$phone}: {$code}");
+        if (self::sendsEmail()) {
+            if (! $email) {
+                OtpCode::where('phone', $phone)->delete();
 
-                return;
+                throw ValidationException::withMessages([
+                    'email' => ['فعلاً کد تأیید فقط به ایمیل ارسال می‌شود. لطفاً ایمیل را وارد کنید.'],
+                ]);
             }
 
+            try {
+                $this->mail->sendOtp($email, $code, $purpose);
+                $emailed = true;
+            } catch (\Throwable $e) {
+                Log::error('OTP email send failed', [
+                    'email' => $email,
+                    'error' => $e->getMessage(),
+                ]);
+
+                if (! self::sendsSms()) {
+                    OtpCode::where('phone', $phone)->delete();
+
+                    throw ValidationException::withMessages([
+                        'email' => ['ارسال ایمیل موقتاً ممکن نیست. لطفاً چند لحظه بعد دوباره تلاش کنید.'],
+                    ]);
+                }
+            }
+        }
+
+        if (self::sendsSms() && $isMobile) {
+            try {
+                $this->sms->sendOtp($phone, $code);
+                $smsSent = true;
+            } catch (\Throwable $e) {
+                Log::error('OTP SMS send failed', [
+                    'phone' => $phone,
+                    'error' => $e->getMessage(),
+                ]);
+
+                if (app()->isLocal()) {
+                    Log::warning("LOCAL OTP for {$phone}: {$code}");
+                    $smsSent = true;
+                } elseif (! $emailed) {
+                    OtpCode::where('phone', $phone)->delete();
+
+                    throw ValidationException::withMessages([
+                        'phone' => ['ارسال پیامک موقتاً ممکن نیست. لطفاً چند لحظه بعد دوباره تلاش کنید.'],
+                    ]);
+                }
+            }
+        }
+
+        if (! $emailed && ! $smsSent) {
             OtpCode::where('phone', $phone)->delete();
 
             throw ValidationException::withMessages([
-                'phone' => ['ارسال پیامک موقتاً ممکن نیست. لطفاً چند لحظه بعد دوباره تلاش کنید.'],
+                'phone' => ['ارسال کد ممکن نیست.'],
             ]);
         }
+
+        return $emailed;
     }
 
     public function verify(string $phone, string $code): void
@@ -146,6 +238,38 @@ class OtpService
         }
 
         return $phone;
+    }
+
+    public static function adminTarget(int $adminId): string
+    {
+        return 'admin:'.$adminId;
+    }
+
+    private function resolveEmail(string $phone): ?string
+    {
+        $pending = $this->pullEmail($phone);
+        if ($pending) {
+            return $pending;
+        }
+
+        $stored = User::query()
+            ->where('phone', $phone)
+            ->where('role', 'customer')
+            ->value('email');
+
+        return $this->normalizeEmail(is_string($stored) ? $stored : null);
+    }
+
+    private function normalizeEmail(?string $email): ?string
+    {
+        $email = strtolower(trim((string) $email));
+
+        return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : null;
+    }
+
+    private function emailKey(string $phone): string
+    {
+        return 'otp_email:'.$phone;
     }
 
     private function attemptsKey(string $phone): string

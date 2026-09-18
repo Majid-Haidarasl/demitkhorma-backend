@@ -20,10 +20,17 @@ class CustomerMessageCampaign extends Model
         'selected' => 'انتخاب تکی',
     ];
 
-    protected $appends = ['audience_label'];
+    public const CHANNELS = [
+        'sms' => 'پیامک',
+        'email' => 'ایمیل',
+    ];
+
+    protected $appends = ['audience_label', 'channel_label'];
 
     protected $fillable = [
         'audience',
+        'channel',
+        'subject',
         'message',
         'recipients_count',
         'sent_count',
@@ -34,6 +41,11 @@ class CustomerMessageCampaign extends Model
     protected function audienceLabel(): Attribute
     {
         return Attribute::get(fn () => self::AUDIENCES[$this->audience] ?? $this->audience);
+    }
+
+    protected function channelLabel(): Attribute
+    {
+        return Attribute::get(fn () => self::CHANNELS[$this->channel] ?? $this->channel);
     }
 
     public function logs(): HasMany

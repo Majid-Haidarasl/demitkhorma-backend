@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\SupportTicket;
 use App\Services\OtpService;
+use App\Support\SafeInput;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -25,18 +26,19 @@ class AuthController extends Controller
             ]);
         }
 
-        $otp->send($phone);
+        $email = $this->emailForOtp($request, $user);
+        if ($email) {
+            $otp->rememberEmail($phone, $email);
+        }
 
-        return response()->json([
-            'message' => 'کد تأیید ارسال شد.',
-            'data' => ['next' => 'otp', 'expires_in' => OtpService::TTL_SECONDS],
-        ]);
+        $emailed = $otp->send($phone, $email);
+
+        return response()->json($this->otpSentResponse($emailed, next: 'otp'));
     }
 
     public function registerSendOtp(Request $request, OtpService $otp): JsonResponse
     {
         $phone = $this->validatePhone($request);
-
         $user = User::where('phone', $phone)->where('role', 'customer')->first();
 
         if ($user?->password) {
@@ -45,12 +47,14 @@ class AuthController extends Controller
             ]);
         }
 
-        $otp->send($phone);
+        $email = $this->emailForOtp($request, $user);
+        if ($email) {
+            $otp->rememberEmail($phone, $email);
+        }
 
-        return response()->json([
-            'message' => 'کد تأیید ارسال شد.',
-            'data' => ['expires_in' => OtpService::TTL_SECONDS],
-        ]);
+        $emailed = $otp->send($phone, $email);
+
+        return response()->json($this->otpSentResponse($emailed));
     }
 
     public function register(Request $request, OtpService $otp): JsonResponse
@@ -59,6 +63,9 @@ class AuthController extends Controller
             'code' => ['nullable', 'string', 'size:6'],
             'password' => $this->passwordRules(true),
             'birth_date' => ['nullable', 'date', 'before:today', 'after:1900-01-01'],
+            'email' => OtpService::requiresEmail()
+                ? ['required', 'email', 'max:255']
+                : ['nullable', 'email', 'max:255'],
         ], $this->passwordMessages());
 
         $phone = $this->validatePhone($request);
@@ -74,8 +81,17 @@ class AuthController extends Controller
 
         $payload = [
             'password' => $data['password'],
-            'phone_verified_at' => now(),
         ];
+
+        $email = $this->uniqueEmail($data['email'] ?? $otp->pullEmail($phone), $user?->id);
+        if (OtpService::requiresEmail() && ! $email) {
+            throw ValidationException::withMessages([
+                'email' => ['فعلاً ثبت‌نام فقط با ایمیل ممکن است. لطفاً ایمیل را وارد کنید.'],
+            ]);
+        }
+        if ($email) {
+            $payload['email'] = $email;
+        }
 
         if (! empty($data['birth_date'])) {
             $payload['birth_date'] = $data['birth_date'];
@@ -87,19 +103,31 @@ class AuthController extends Controller
                     'phone' => $phone,
                     ...$payload,
                 ]);
-                $user->forceFill(['role' => 'customer'])->save();
-            } catch (UniqueConstraintViolationException) {
+                $user->forceFill([
+                    'role' => 'customer',
+                    'phone_verified_at' => now(),
+                ])->save();
+            } catch (UniqueConstraintViolationException $e) {
+                if (str_contains($e->getMessage(), 'email')) {
+                    throw ValidationException::withMessages([
+                        'email' => ['این ایمیل قبلاً ثبت شده است.'],
+                    ]);
+                }
+
                 throw ValidationException::withMessages([
                     'phone' => ['این شماره قبلاً ثبت شده است. وارد شوید.'],
                 ]);
             }
         } else {
-            $user->update([
-                'password' => $data['password'],
-                'phone_verified_at' => $user->phone_verified_at ?? now(),
+            $user->update($payload + [
                 'birth_date' => ! empty($data['birth_date']) ? $data['birth_date'] : $user->birth_date,
             ]);
+            $user->forceFill([
+                'phone_verified_at' => $user->phone_verified_at ?? now(),
+            ])->save();
         }
+
+        $otp->forgetEmail($phone);
 
         return response()->json([
             'message' => 'ثبت‌نام با موفقیت انجام شد.',
@@ -110,13 +138,14 @@ class AuthController extends Controller
     public function sendOtp(Request $request, OtpService $otp): JsonResponse
     {
         $phone = $this->validatePhone($request);
+        $user = User::where('phone', $phone)->first();
+        $email = $this->emailForOtp($request, $user);
+        if ($email) {
+            $otp->rememberEmail($phone, $email);
+        }
+        $emailed = $otp->send($phone, $email);
 
-        $otp->send($phone);
-
-        return response()->json([
-            'message' => 'کد تأیید ارسال شد.',
-            'data' => ['expires_in' => OtpService::TTL_SECONDS],
-        ]);
+        return response()->json($this->otpSentResponse($emailed));
     }
 
     public function confirmOtp(Request $request, OtpService $otp): JsonResponse
@@ -158,8 +187,14 @@ class AuthController extends Controller
             $user->forceFill(['phone_verified_at' => now()])->save();
         }
 
+        $pendingEmail = $this->uniqueEmail($otp->pullEmail($phone), $user->id);
+        if ($pendingEmail && ! $user->email) {
+            $user->update(['email' => $pendingEmail]);
+        }
+        $otp->forgetEmail($phone);
+
         return response()->json([
-            'data' => $this->authPayload($user),
+            'data' => $this->authPayload($user->fresh()),
         ]);
     }
 
@@ -200,12 +235,14 @@ class AuthController extends Controller
             return response()->json(['message' => 'در صورت وجود حساب، کد تأیید ارسال شد.']);
         }
 
-        $otp->send($phone);
+        $email = $this->emailForOtp($request, $user);
+        if ($email) {
+            $otp->rememberEmail($phone, $email);
+        }
 
-        return response()->json([
-            'message' => 'کد بازیابی ارسال شد.',
-            'data' => ['expires_in' => OtpService::TTL_SECONDS],
-        ]);
+        $emailed = $otp->send($phone, $email, 'بازیابی رمز عبور');
+
+        return response()->json($this->otpSentResponse($emailed, recovery: true));
     }
 
     public function resetPassword(Request $request, OtpService $otp): JsonResponse
@@ -228,6 +265,12 @@ class AuthController extends Controller
 
         $user->update(['password' => $data['password']]);
         $user->tokens()->delete();
+
+        $pendingEmail = $this->uniqueEmail($otp->pullEmail($phone), $user->id);
+        if ($pendingEmail && ! $user->email) {
+            $user->update(['email' => $pendingEmail]);
+        }
+        $otp->forgetEmail($phone);
 
         if (! $user->phone_verified_at) {
             $user->forceFill(['phone_verified_at' => now()])->save();
@@ -325,6 +368,98 @@ class AuthController extends Controller
         return response()->json(['message' => 'رمز عبور مدیر بروزرسانی شد.']);
     }
 
+    public function updateAdminProfile(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'email' => ['nullable', 'email', 'max:255'],
+        ]);
+
+        $user->update([
+            'email' => $this->uniqueEmail($data['email'] ?? null, $user->id),
+        ]);
+
+        return response()->json([
+            'message' => 'ایمیل مدیر ذخیره شد.',
+            'data' => $user->fresh(),
+        ]);
+    }
+
+    public function sendAdminPasswordResetOtp(Request $request, OtpService $otp): JsonResponse
+    {
+        $data = $request->validate([
+            'username' => ['required', 'string', 'max:80'],
+        ]);
+
+        $user = User::query()
+            ->where('username', $data['username'])
+            ->where('role', 'admin')
+            ->first();
+
+        if ($user?->email) {
+            $otp->send(OtpService::adminTarget($user->id), $user->email, 'بازیابی رمز مدیر');
+        }
+
+        return response()->json([
+            'message' => 'در صورت وجود حساب و ایمیل، کد بازیابی ارسال شد.',
+            'data' => ['expires_in' => OtpService::TTL_SECONDS, 'emailed' => (bool) $user?->email],
+        ]);
+    }
+
+    public function confirmAdminOtp(Request $request, OtpService $otp): JsonResponse
+    {
+        $data = $request->validate([
+            'username' => ['required', 'string', 'max:80'],
+            'code' => ['required', 'string', 'size:6'],
+        ]);
+
+        $user = User::query()
+            ->where('username', $data['username'])
+            ->where('role', 'admin')
+            ->first();
+
+        if (! $user) {
+            throw ValidationException::withMessages([
+                'code' => ['کد وارد شده نادرست است.'],
+            ]);
+        }
+
+        $otp->verify(OtpService::adminTarget($user->id), $data['code']);
+
+        return response()->json(['message' => 'کد تأیید شد.']);
+    }
+
+    public function resetAdminPassword(Request $request, OtpService $otp): JsonResponse
+    {
+        $data = $request->validate([
+            'username' => ['required', 'string', 'max:80'],
+            'code' => ['nullable', 'string', 'size:6'],
+            'password' => $this->passwordRules(true),
+        ], $this->passwordMessages());
+
+        $user = User::query()
+            ->where('username', $data['username'])
+            ->where('role', 'admin')
+            ->first();
+
+        if (! $user) {
+            throw ValidationException::withMessages([
+                'username' => ['نام کاربری یا کد نامعتبر است.'],
+            ]);
+        }
+
+        $otp->consumeProofOrCode(OtpService::adminTarget($user->id), $data['code'] ?? null);
+        $user->update(['password' => $data['password']]);
+        $user->tokens()->delete();
+
+        return response()->json(['message' => 'رمز عبور مدیر با موفقیت تغییر کرد.']);
+    }
+
     public function updateProfile(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -337,13 +472,15 @@ class AuthController extends Controller
             'first_name' => ['required', 'string', 'max:80'],
             'last_name' => ['required', 'string', 'max:80'],
             'birth_date' => ['nullable', 'date', 'before:today', 'after:1900-01-01'],
+            'email' => ['nullable', 'email', 'max:255'],
         ]);
 
         $user->update([
-            'first_name' => $data['first_name'],
-            'last_name' => $data['last_name'],
-            'name' => trim($data['first_name'].' '.$data['last_name']),
+            'first_name' => SafeInput::text($data['first_name']),
+            'last_name' => SafeInput::text($data['last_name']),
+            'name' => trim(SafeInput::text($data['first_name']).' '.SafeInput::text($data['last_name'])),
             'birth_date' => $data['birth_date'] ?? null,
+            'email' => $this->uniqueEmail($data['email'] ?? null, $user->id),
         ]);
 
         return response()->json([
@@ -408,6 +545,95 @@ class AuthController extends Controller
         }
 
         return $phone;
+    }
+
+    private function emailForOtp(Request $request, ?User $user): ?string
+    {
+        $fromRequest = $this->optionalEmail($request, $user?->id);
+        $stored = $this->normalizeStoredEmail($user?->email);
+        $email = $fromRequest ?? $stored;
+
+        if (OtpService::requiresEmail() && ! $email) {
+            throw ValidationException::withMessages([
+                'email' => ['فعلاً کد تأیید فقط به ایمیل ارسال می‌شود. لطفاً ایمیل را وارد کنید.'],
+            ]);
+        }
+
+        return $email;
+    }
+
+    private function normalizeStoredEmail(?string $email): ?string
+    {
+        $email = strtolower(trim((string) $email));
+
+        return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : null;
+    }
+
+    private function otpSentResponse(bool $emailed, ?string $next = null, bool $recovery = false): array
+    {
+        $message = match (true) {
+            $emailed && OtpService::sendsSms() => $recovery
+                ? 'کد بازیابی به موبایل و ایمیل ارسال شد.'
+                : 'کد تأیید به موبایل و ایمیل ارسال شد.',
+            $emailed => $recovery ? 'کد بازیابی به ایمیل ارسال شد.' : 'کد تأیید به ایمیل ارسال شد.',
+            default => $recovery ? 'کد بازیابی ارسال شد.' : 'کد تأیید ارسال شد.',
+        };
+
+        $data = [
+            'expires_in' => OtpService::TTL_SECONDS,
+            'emailed' => $emailed,
+        ];
+        if ($next) {
+            $data['next'] = $next;
+        }
+
+        return [
+            'message' => $message,
+            'data' => $data,
+        ];
+    }
+
+    private function optionalEmail(Request $request, ?int $ignoreUserId = null): ?string
+    {
+        $raw = strtolower(trim((string) $request->input('email', '')));
+        if ($raw === '') {
+            return null;
+        }
+
+        if (! filter_var($raw, FILTER_VALIDATE_EMAIL) || strlen($raw) > 255) {
+            throw ValidationException::withMessages([
+                'email' => ['ایمیل وارد شده معتبر نیست.'],
+            ]);
+        }
+
+        return $this->uniqueEmail($raw, $ignoreUserId);
+    }
+
+    private function uniqueEmail(?string $email, ?int $ignoreUserId = null): ?string
+    {
+        $email = strtolower(trim((string) $email));
+        if ($email === '') {
+            return null;
+        }
+
+        if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw ValidationException::withMessages([
+                'email' => ['ایمیل وارد شده معتبر نیست.'],
+            ]);
+        }
+
+        $taken = User::query()
+            ->where('email', $email)
+            ->when($ignoreUserId, fn ($q) => $q->where('id', '!=', $ignoreUserId))
+            ->exists();
+
+        if ($taken) {
+            throw ValidationException::withMessages([
+                'email' => ['این ایمیل قبلاً ثبت شده است.'],
+            ]);
+        }
+
+        return $email;
     }
 
     private function authPayload(User $user): array

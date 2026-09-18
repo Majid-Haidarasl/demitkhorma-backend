@@ -8,6 +8,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Services\ActivityLogger;
+use App\Support\SafeInput;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,7 +23,10 @@ class ProductController extends Controller
 
         $products = Product::with(['category', 'variants', 'images'])
             ->when($request->filled('search'), function ($q) use ($request) {
-                $s = $request->search;
+                $s = SafeInput::likeContains($request->input('search'));
+                if ($s === null) {
+                    return;
+                }
                 $q->where(function ($inner) use ($s) {
                     $inner->where('name_fa', 'like', "%{$s}%")
                         ->orWhere('slug', 'like', "%{$s}%");
@@ -32,7 +36,7 @@ class ProductController extends Controller
             ->when($request->has('is_active') && $request->is_active !== '', fn ($q) => $q->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN)))
             ->when($request->boolean('low_stock'), fn ($q) => $q->where('stock', '<=', $threshold))
             ->orderByDesc('id')
-            ->paginate($request->integer('per_page', 20));
+            ->paginate($request->safePerPage( 20));
 
         return response()->json($products);
     }
@@ -120,7 +124,7 @@ class ProductController extends Controller
             'category_id' => ['required', 'integer', 'exists:categories,id'],
             'name_fa' => ['required', 'string', 'max:255'],
             'slug' => ['nullable', 'string', 'max:255', $slugRule],
-            'description' => ['nullable', 'string'],
+            'description' => ['nullable', 'string', 'max:10000'],
             'packaging_color' => ['nullable', 'string', 'max:7'],
             'base_price' => ['required', 'integer', 'min:0'],
             'discount_percent' => ['nullable', 'integer', 'min:0', 'max:100'],
@@ -138,7 +142,7 @@ class ProductController extends Controller
             'variants.*.stock' => ['nullable', 'integer', 'min:0'],
             'images' => ['nullable', 'array'],
             'images.*.id' => ['nullable', 'integer'],
-            'images.*.path' => ['required_with:images', 'string', 'max:500', 'regex:/^[A-Za-z0-9_\\/\\-]+\\.(jpe?g|png|webp|gif)$/i'],
+            'images.*.path' => ['required_with:images', 'string', 'max:255', 'regex:/^(?!.*\\.\\.)[A-Za-z0-9_\\/-]+\\.(jpe?g|png|webp|gif)$/i'],
             'images.*.sort_order' => ['nullable', 'integer', 'min:0'],
         ]);
     }

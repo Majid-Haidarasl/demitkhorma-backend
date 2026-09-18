@@ -25,19 +25,23 @@ class CustomerMessageController extends Controller
     {
         $data = $request->validate([
             'audience' => ['required', 'string', Rule::in(array_keys(CustomerMessageCampaign::AUDIENCES))],
+            'channel' => ['nullable', 'string', Rule::in(array_keys(CustomerMessageCampaign::CHANNELS))],
             'user_ids' => ['nullable', 'array'],
             'user_ids.*' => ['integer', 'exists:users,id'],
         ]);
 
-        $users = $messages->recipients($data['audience'], $data['user_ids'] ?? []);
+        $channel = $data['channel'] ?? 'sms';
+        $users = $messages->recipients($data['audience'], $data['user_ids'] ?? [], $channel);
 
         return response()->json([
             'data' => [
                 'count' => $users->count(),
                 'max' => CustomerMessageService::MAX_RECIPIENTS,
+                'channel' => $channel,
                 'preview' => $users->take(40)->map(fn ($u) => [
                     'id' => $u->id,
                     'phone' => $u->phone,
+                    'email' => $u->email,
                     'first_name' => $u->first_name,
                     'last_name' => $u->last_name,
                     'name' => $u->name,
@@ -51,9 +55,12 @@ class CustomerMessageController extends Controller
 
     public function send(Request $request, CustomerMessageService $messages): JsonResponse
     {
+        $channel = $request->input('channel', 'sms') === 'email' ? 'email' : 'sms';
         $data = $request->validate([
             'audience' => ['required', 'string', Rule::in(array_keys(CustomerMessageCampaign::AUDIENCES))],
-            'message' => ['required', 'string', 'min:5', 'max:700'],
+            'channel' => ['required', 'string', Rule::in(array_keys(CustomerMessageCampaign::CHANNELS))],
+            'subject' => ['nullable', 'string', 'max:120'],
+            'message' => ['required', 'string', 'min:5', 'max:'.($channel === 'email' ? '2000' : '700')],
             'user_ids' => ['nullable', 'array'],
             'user_ids.*' => ['integer', 'exists:users,id'],
         ]);
@@ -65,6 +72,8 @@ class CustomerMessageController extends Controller
             $data['message'],
             $data['user_ids'] ?? [],
             $request->user()?->id,
+            $data['channel'],
+            $data['subject'] ?? null,
         );
 
         return response()->json(['data' => $campaign], 201);
@@ -75,7 +84,7 @@ class CustomerMessageController extends Controller
         $rows = CustomerMessageCampaign::query()
             ->with('creator:id,username,name')
             ->latest()
-            ->paginate($request->integer('per_page', 15));
+            ->paginate($request->safePerPage(15));
 
         return response()->json($rows);
     }

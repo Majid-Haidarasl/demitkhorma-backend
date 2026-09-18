@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Support\SafeInput;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -15,11 +16,11 @@ class ProductController extends Controller
             ->where('is_active', true);
 
         if ($request->filled('category')) {
-            $query->whereHas('category', fn ($q) => $q->where('slug', $request->category));
+            $query->whereHas('category', fn ($q) => $q->where('slug', $request->string('category')->toString()));
         }
 
-        if ($request->filled('search')) {
-            $search = $request->search;
+        $search = SafeInput::likeContains($request->input('search'));
+        if ($search !== null) {
             $query->where('name_fa', 'like', "%{$search}%");
         }
 
@@ -41,7 +42,7 @@ class ProductController extends Controller
             $query->where('discount_percent', '>', 0);
         }
 
-        $products = $query->paginate($request->integer('per_page', 20));
+        $products = $query->paginate($request->safePerPage( 20));
 
         return response()->json($products);
     }

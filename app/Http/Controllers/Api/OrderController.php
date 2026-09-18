@@ -28,7 +28,7 @@ class OrderController extends Controller
             ->orders()
             ->with('items')
             ->latest()
-            ->paginate(min(50, max(1, (int) $request->input('per_page', 20))));
+            ->paginate($request->safePerPage());
 
         return response()->json($orders);
     }

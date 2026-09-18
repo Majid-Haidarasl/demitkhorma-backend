@@ -18,13 +18,14 @@ class CustomerController extends Controller
                 $s = $request->search;
                 $q->where(function ($inner) use ($s) {
                     $inner->where('phone', 'like', "%{$s}%")
+                        ->orWhere('email', 'like', "%{$s}%")
                         ->orWhere('name', 'like', "%{$s}%")
                         ->orWhere('first_name', 'like', "%{$s}%")
                         ->orWhere('last_name', 'like', "%{$s}%");
                 });
             })
             ->latest()
-            ->paginate($request->integer('per_page', 20));
+            ->paginate($request->safePerPage( 20));
 
         return response()->json($customers);
     }

@@ -35,7 +35,7 @@ class SupportTicketController extends Controller
             })
             ->orderByDesc('unread_by_admin')
             ->orderByDesc('last_message_at')
-            ->paginate($request->integer('per_page', 20));
+            ->paginate($request->safePerPage( 20));
 
         $tickets->getCollection()->transform(fn (SupportTicket $t) => $t->toApiArray('admin'));
 

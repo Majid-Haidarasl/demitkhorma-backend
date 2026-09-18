@@ -47,8 +47,8 @@ class BannerController extends Controller
         return $request->validate([
             'title' => ['nullable', 'string', 'max:255'],
             'subtitle' => ['nullable', 'string', 'max:255'],
-            'image' => ['required', 'string', 'max:255'],
-            'link' => ['nullable', 'string', 'max:255', 'regex:/^(\\/[\\w\\-\\/?=&%.]*|https?:\\/\\/.+)$/i'],
+            'image' => ['required', 'string', 'max:255', 'regex:/^(?!.*\\.\\.)[A-Za-z0-9_\\/-]+\\.(jpe?g|png|webp|gif)$/i'],
+            'link' => ['nullable', 'string', 'max:255', 'regex:/^(\\/(?!\\/)[A-Za-z0-9._~\\-\\/?=&%#]*|https:\\/\\/[A-Za-z0-9.-]+(:\\d+)?(\\/[^\\s]*)?)$/'],
             'placement' => ['nullable', 'string', 'in:main,side'],
             'is_active' => ['nullable', 'boolean'],
             'is_draft' => ['nullable', 'boolean'],

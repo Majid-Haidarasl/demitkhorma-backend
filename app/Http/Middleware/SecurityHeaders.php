@@ -18,7 +18,9 @@ class SecurityHeaders
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
         $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
         $response->headers->set('X-XSS-Protection', '0');
+        $response->headers->set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
         $response->headers->remove('X-Powered-By');
+        $response->headers->remove('Server');
 
         if ($request->isSecure() || app()->environment('production')) {
             $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');

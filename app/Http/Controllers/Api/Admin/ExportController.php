@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\User;
 use App\Services\ActivityLogger;
+use App\Support\SafeInput;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -26,16 +27,16 @@ class ExportController extends Controller
         ], function () use ($query) {
             foreach ($query->cursor() as $o) {
                 yield [
-                    $o->id,
-                    $o->user?->phone,
-                    $this->customerLabel($o->user),
-                    $o->subtotal,
-                    $o->discount_amount,
-                    $o->shipping_cost,
-                    $o->total,
-                    $o->status,
-                    $o->coupon_code,
-                    $o->created_at?->toDateTimeString(),
+                    SafeInput::csvCell($o->id),
+                    SafeInput::csvCell($o->user?->phone),
+                    SafeInput::csvCell($this->customerLabel($o->user)),
+                    SafeInput::csvCell($o->subtotal),
+                    SafeInput::csvCell($o->discount_amount),
+                    SafeInput::csvCell($o->shipping_cost),
+                    SafeInput::csvCell($o->total),
+                    SafeInput::csvCell($o->status),
+                    SafeInput::csvCell($o->coupon_code),
+                    SafeInput::csvCell($o->created_at?->toDateTimeString()),
                 ];
             }
         });
@@ -52,12 +53,12 @@ class ExportController extends Controller
         ], function () use ($query) {
             foreach ($query->cursor() as $u) {
                 yield [
-                    $u->id,
-                    $u->phone,
-                    $this->customerLabel($u),
-                    $u->orders_count,
-                    $u->phone_verified_at?->toDateTimeString(),
-                    $u->created_at?->toDateTimeString(),
+                    SafeInput::csvCell($u->id),
+                    SafeInput::csvCell($u->phone),
+                    SafeInput::csvCell($this->customerLabel($u)),
+                    SafeInput::csvCell($u->orders_count),
+                    SafeInput::csvCell($u->phone_verified_at?->toDateTimeString()),
+                    SafeInput::csvCell($u->created_at?->toDateTimeString()),
                 ];
             }
         });

@@ -59,6 +59,9 @@ Route::post('/auth/login', [AuthController::class, 'login'])->middleware('thrott
 Route::post('/auth/password/forgot', [AuthController::class, 'sendPasswordResetOtp'])->middleware('throttle:3,1');
 Route::post('/auth/password/reset', [AuthController::class, 'resetPassword'])->middleware('throttle:5,1');
 Route::post('/auth/admin/login', [AuthController::class, 'adminLogin'])->middleware('throttle:5,1');
+Route::post('/auth/admin/password/forgot', [AuthController::class, 'sendAdminPasswordResetOtp'])->middleware('throttle:3,1');
+Route::post('/auth/admin/otp/confirm', [AuthController::class, 'confirmAdminOtp'])->middleware('throttle:5,1');
+Route::post('/auth/admin/password/reset', [AuthController::class, 'resetAdminPassword'])->middleware('throttle:5,1');
 Route::get('/payment/zarinpal/callback', [PaymentController::class, 'callback'])->middleware('throttle:30,1');
 
 Route::middleware('auth:sanctum')->group(function () {
@@ -172,4 +175,5 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::patch('/support/tickets/{ticket}', [AdminSupportTicketController::class, 'update']);
 
     Route::put('/password', [AuthController::class, 'updateAdminPassword']);
+    Route::put('/profile', [AuthController::class, 'updateAdminProfile']);
 });
