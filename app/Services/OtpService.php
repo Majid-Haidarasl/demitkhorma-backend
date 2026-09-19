@@ -101,39 +101,46 @@ class OtpService
         }
 
         $isMobile = (bool) preg_match('/^09\d{9}$/', $phone);
+        $isAdminTarget = str_starts_with($phone, 'admin:');
         $email = $this->normalizeEmail($email) ?? $this->resolveEmail($phone);
         $emailed = false;
         $smsSent = false;
+        $wantEmail = self::sendsEmail() || $isAdminTarget;
+        $wantSms = self::sendsSms() && $isMobile;
 
-        if (self::sendsEmail()) {
+        if ($wantEmail) {
             if (! $email) {
-                OtpCode::where('phone', $phone)->delete();
-
-                throw ValidationException::withMessages([
-                    'email' => ['فعلاً کد تأیید فقط به ایمیل ارسال می‌شود. لطفاً ایمیل را وارد کنید.'],
-                ]);
-            }
-
-            try {
-                $this->mail->sendOtp($email, $code, $purpose);
-                $emailed = true;
-            } catch (\Throwable $e) {
-                Log::error('OTP email send failed', [
-                    'email' => $email,
-                    'error' => $e->getMessage(),
-                ]);
-
-                if (! self::sendsSms()) {
+                if ($isAdminTarget || self::requiresEmail()) {
                     OtpCode::where('phone', $phone)->delete();
 
                     throw ValidationException::withMessages([
-                        'email' => ['ارسال ایمیل موقتاً ممکن نیست. لطفاً چند لحظه بعد دوباره تلاش کنید.'],
+                        'email' => $isAdminTarget
+                            ? ['برای بازیابی رمز مدیر، ایمیل حساب لازم است.']
+                            : ['فعلاً کد تأیید فقط به ایمیل ارسال می‌شود. لطفاً ایمیل را وارد کنید.'],
                     ]);
+                }
+            } else {
+                try {
+                    $this->mail->sendOtp($email, $code, $purpose);
+                    $emailed = true;
+                } catch (\Throwable $e) {
+                    Log::error('OTP email send failed', [
+                        'email' => $email,
+                        'error' => $e->getMessage(),
+                    ]);
+
+                    if (! $wantSms) {
+                        OtpCode::where('phone', $phone)->delete();
+
+                        throw ValidationException::withMessages([
+                            'email' => ['ارسال ایمیل موقتاً ممکن نیست. لطفاً چند لحظه بعد دوباره تلاش کنید.'],
+                        ]);
+                    }
                 }
             }
         }
 
-        if (self::sendsSms() && $isMobile) {
+        if ($wantSms) {
             try {
                 $this->sms->sendOtp($phone, $code);
                 $smsSent = true;

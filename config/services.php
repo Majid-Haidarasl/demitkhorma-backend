@@ -40,12 +40,12 @@ return [
     ],
 
     'otp' => [
-        // email | sms | both — SMS stays off until the provider is ready.
-        'channel' => env('OTP_CHANNEL', 'email'),
+        // email | sms | both — customer OTP. Admin recovery always uses email when available.
+        'channel' => env('OTP_CHANNEL', 'sms'),
     ],
 
     'sms' => [
-        'driver' => env('SMS_DRIVER', 'log'),
+        'driver' => env('SMS_DRIVER', 'smsir'),
         'kavenegar' => [
             'api_key' => env('KAVENEGAR_API_KEY'),
             'sender' => env('KAVENEGAR_SENDER'),
