@@ -67,23 +67,64 @@ class OrderController extends Controller
             $subtotal = 0;
             $lineItems = [];
 
-            foreach ($data['items'] as $item) {
-                $product = Product::where('is_active', true)
+            $productIds = collect($data['items'])->pluck('product_id')->unique()->values();
+            $variantIds = collect($data['items'])->pluck('product_variant_id')->filter()->unique()->values();
+
+            $products = Product::query()
+                ->where('is_active', true)
+                ->whereIn('id', $productIds)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $variants = $variantIds->isEmpty()
+                ? collect()
+                : ProductVariant::query()
+                    ->whereIn('id', $variantIds)
                     ->lockForUpdate()
-                    ->findOrFail($item['product_id']);
+                    ->get()
+                    ->keyBy('id');
+
+            $productsWithVariants = ProductVariant::query()
+                ->whereIn('product_id', $productIds)
+                ->distinct()
+                ->pluck('product_id')
+                ->flip();
+
+            $flashDiscounts = FlashSale::query()
+                ->whereIn('product_id', $productIds)
+                ->where('is_active', true)
+                ->where('is_draft', false)
+                ->where('starts_at', '<=', Carbon::now())
+                ->where('ends_at', '>=', Carbon::now())
+                ->get(['product_id', 'discount_percent'])
+                ->groupBy('product_id')
+                ->map(fn ($rows) => (int) $rows->max('discount_percent'));
+
+            foreach ($data['items'] as $item) {
+                $product = $products->get($item['product_id']);
+                if (! $product) {
+                    throw ValidationException::withMessages([
+                        'items' => ['یکی از محصولات در دسترس نیست.'],
+                    ]);
+                }
+
                 $variant = null;
 
                 if (! empty($item['product_variant_id'])) {
-                    $variant = ProductVariant::where('product_id', $product->id)
-                        ->lockForUpdate()
-                        ->findOrFail($item['product_variant_id']);
-                } elseif ($product->variants()->exists()) {
+                    $variant = $variants->get($item['product_variant_id']);
+                    if (! $variant || (int) $variant->product_id !== (int) $product->id) {
+                        throw ValidationException::withMessages([
+                            'items' => ["وزن انتخاب‌شده برای «{$product->name_fa}» معتبر نیست."],
+                        ]);
+                    }
+                } elseif ($productsWithVariants->has($product->id)) {
                     throw ValidationException::withMessages([
                         'items' => ["لطفاً وزن محصول «{$product->name_fa}» را انتخاب کنید."],
                     ]);
                 }
 
-                $unitPrice = $this->unitPrice($product, $variant);
+                $unitPrice = $this->unitPrice($product, $variant, (int) ($flashDiscounts[$product->id] ?? 0));
                 $stock = $variant?->stock ?? $product->stock;
 
                 if ($stock < $item['qty']) {
@@ -140,9 +181,7 @@ class OrderController extends Controller
                 'notes' => $data['notes'] ?? null,
             ]);
 
-            foreach ($lineItems as $line) {
-                $order->items()->create($line);
-            }
+            $order->items()->createMany($lineItems);
 
             $this->persistCustomerAddress($request->user(), $shippingAddress);
 
@@ -264,10 +303,11 @@ class OrderController extends Controller
         $user->addresses()->create([...$payload, 'is_default' => true]);
     }
 
-    private function unitPrice(Product $product, ?ProductVariant $variant): int
+    private function unitPrice(Product $product, ?ProductVariant $variant, ?int $flashDiscount = null): int
     {
         $base = $variant?->price ?? $product->base_price;
-        $discount = max((int) $product->discount_percent, $this->activeFlashDiscount($product->id));
+        $flash = $flashDiscount ?? $this->activeFlashDiscount($product->id);
+        $discount = max((int) $product->discount_percent, $flash);
 
         return (int) round($base * (1 - $discount / 100));
     }

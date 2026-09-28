@@ -34,9 +34,9 @@ class OrderFulfillmentService
         $order->loadMissing('items');
 
         $accounting = app(AccountingService::class);
+        $accounting->snapshotCosts($order->items);
 
         foreach ($order->items as $item) {
-            $accounting->snapshotCost($item);
             $this->decrementStock($item->product_id, $item->product_variant_id, $item->qty, $order->id);
         }
 
@@ -68,8 +68,8 @@ class OrderFulfillmentService
 
         if (! $wasReserved && $willReserve) {
             $accounting = app(AccountingService::class);
+            $accounting->snapshotCosts($order->items);
             foreach ($order->items as $item) {
-                $accounting->snapshotCost($item);
                 $this->decrementStock($item->product_id, $item->product_variant_id, $item->qty, $order->id);
             }
             CartItem::query()->where('user_id', $order->user_id)->delete();
@@ -125,14 +125,28 @@ class OrderFulfillmentService
     {
         $order->loadMissing('items');
 
+        $variantIds = $order->items->pluck('product_variant_id')->filter()->unique()->values();
+        $productIds = $order->items
+            ->filter(fn ($item) => ! $item->product_variant_id)
+            ->pluck('product_id')
+            ->unique()
+            ->values();
+
+        $variants = $variantIds->isEmpty()
+            ? collect()
+            : ProductVariant::query()->whereIn('id', $variantIds)->lockForUpdate()->get()->keyBy('id');
+        $products = $productIds->isEmpty()
+            ? collect()
+            : Product::query()->whereIn('id', $productIds)->lockForUpdate()->get()->keyBy('id');
+
         foreach ($order->items as $item) {
             if ($item->product_variant_id) {
-                $variant = ProductVariant::lockForUpdate()->find($item->product_variant_id);
+                $variant = $variants->get($item->product_variant_id);
                 if (! $variant || $variant->stock < $item->qty) {
                     throw new RuntimeException("Insufficient stock for variant #{$item->product_variant_id}");
                 }
             } else {
-                $product = Product::lockForUpdate()->find($item->product_id);
+                $product = $products->get($item->product_id);
                 if (! $product || $product->stock < $item->qty) {
                     throw new RuntimeException("Insufficient stock for product #{$item->product_id}");
                 }

@@ -45,28 +45,55 @@ class CartController extends Controller
         DB::transaction(function () use ($request, $data) {
             $request->user()->cartItems()->delete();
 
+            if ($data['items'] === []) {
+                return;
+            }
+
+            $productIds = collect($data['items'])->pluck('product_id')->unique()->values();
+            $variantIds = collect($data['items'])->pluck('product_variant_id')->filter()->unique()->values();
+
+            $products = Product::query()
+                ->where('is_active', true)
+                ->whereIn('id', $productIds)
+                ->get(['id'])
+                ->keyBy('id');
+
+            $variants = $variantIds->isEmpty()
+                ? collect()
+                : ProductVariant::query()
+                    ->whereIn('id', $variantIds)
+                    ->get(['id', 'product_id'])
+                    ->keyBy('id');
+
+            $rows = [];
             foreach ($data['items'] as $item) {
-                $product = Product::where('is_active', true)->find($item['product_id']);
+                $product = $products->get($item['product_id']);
                 if (! $product) {
                     continue;
                 }
 
                 $variantId = $item['product_variant_id'] ?? null;
                 if ($variantId) {
-                    $variant = ProductVariant::where('product_id', $product->id)->find($variantId);
-                    if (! $variant) {
+                    $variant = $variants->get($variantId);
+                    if (! $variant || (int) $variant->product_id !== (int) $product->id) {
                         throw ValidationException::withMessages([
                             'items' => ['وزن انتخاب‌شده برای محصول معتبر نیست.'],
                         ]);
                     }
                 }
 
-                CartItem::create([
+                $rows[] = [
                     'user_id' => $request->user()->id,
                     'product_id' => $product->id,
                     'product_variant_id' => $variantId,
                     'qty' => $item['qty'],
-                ]);
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+
+            if ($rows !== []) {
+                CartItem::insert($rows);
             }
         });
 

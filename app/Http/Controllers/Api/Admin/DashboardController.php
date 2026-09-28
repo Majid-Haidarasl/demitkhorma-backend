@@ -35,6 +35,10 @@ class DashboardController extends Controller
             ->get()
             ->keyBy('day');
 
+        $rangeAgg = (clone $rangeOrders)
+            ->selectRaw('COALESCE(SUM(total), 0) as revenue, COUNT(*) as orders')
+            ->first();
+
         $chart = [];
         $cursor = $from->copy()->startOfDay();
         while ($cursor <= $to) {
@@ -52,34 +56,57 @@ class DashboardController extends Controller
             }
         }
 
+        $productStats = Product::query()
+            ->selectRaw('COUNT(*) as products_count')
+            ->selectRaw('SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_products')
+            ->selectRaw('SUM(CASE WHEN is_active = 1 AND stock <= ? THEN 1 ELSE 0 END) as low_stock_count', [$threshold])
+            ->first();
+
+        $ordersByStatus = Order::query()
+            ->select('status', DB::raw('COUNT(*) as total'))
+            ->groupBy('status')
+            ->pluck('total', 'status');
+
+        $ordersCount = (int) $ordersByStatus->sum();
+        $attentionOrders = 0;
+        foreach (Order::ATTENTION_STATUSES as $status) {
+            $attentionOrders += (int) ($ordersByStatus[$status] ?? 0);
+        }
+
+        $today = now()->toDateString();
+        $paidRevenue = Order::query()
+            ->whereIn('status', $paidStatuses)
+            ->selectRaw('COALESCE(SUM(total), 0) as all_time')
+            ->selectRaw('COALESCE(SUM(CASE WHEN DATE(created_at) = ? THEN total ELSE 0 END), 0) as today', [$today])
+            ->selectRaw('COALESCE(SUM(CASE WHEN YEAR(created_at) = ? AND MONTH(created_at) = ? THEN total ELSE 0 END), 0) as month', [
+                now()->year,
+                now()->month,
+            ])
+            ->first();
+
         return response()->json([
             'data' => [
                 'from' => $from->toDateString(),
                 'to' => $to->toDateString(),
                 'low_stock_threshold' => $threshold,
-                'products_count' => Product::count(),
-                'active_products' => Product::where('is_active', true)->count(),
-                'low_stock_count' => Product::where('stock', '<=', $threshold)->where('is_active', true)->count(),
-                'orders_count' => Order::count(),
-                'pending_orders' => Order::where('status', 'pending')->count(),
-                'attention_orders' => Order::whereIn('status', Order::ATTENTION_STATUSES)->count(),
-                'paid_orders' => Order::where('status', 'paid')->count(),
-                'processing_orders' => Order::where('status', 'processing')->count(),
-                'shipped_orders' => Order::where('status', 'shipped')->count(),
-                'revenue' => (int) Order::whereIn('status', $paidStatuses)->sum('total'),
-                'revenue_range' => (int) (clone $rangeOrders)->sum('total'),
-                'orders_range' => (clone $rangeOrders)->count(),
-                'revenue_today' => (int) Order::whereIn('status', $paidStatuses)->whereDate('created_at', today())->sum('total'),
-                'revenue_month' => (int) Order::whereIn('status', $paidStatuses)
-                    ->whereMonth('created_at', now()->month)
-                    ->whereYear('created_at', now()->year)
-                    ->sum('total'),
+                'products_count' => (int) ($productStats->products_count ?? 0),
+                'active_products' => (int) ($productStats->active_products ?? 0),
+                'low_stock_count' => (int) ($productStats->low_stock_count ?? 0),
+                'orders_count' => $ordersCount,
+                'pending_orders' => (int) ($ordersByStatus['pending'] ?? 0),
+                'attention_orders' => $attentionOrders,
+                'paid_orders' => (int) ($ordersByStatus['paid'] ?? 0),
+                'processing_orders' => (int) ($ordersByStatus['processing'] ?? 0),
+                'shipped_orders' => (int) ($ordersByStatus['shipped'] ?? 0),
+                'revenue' => (int) ($paidRevenue->all_time ?? 0),
+                'revenue_range' => (int) ($rangeAgg->revenue ?? 0),
+                'orders_range' => (int) ($rangeAgg->orders ?? 0),
+                'revenue_today' => (int) ($paidRevenue->today ?? 0),
+                'revenue_month' => (int) ($paidRevenue->month ?? 0),
                 'customers_count' => User::where('role', 'customer')->count(),
                 'unread_messages' => ContactMessage::where('is_read', false)->count(),
                 'unread_support' => SupportTicket::where('unread_by_admin', true)->count(),
-                'orders_by_status' => Order::select('status', DB::raw('count(*) as total'))
-                    ->groupBy('status')
-                    ->pluck('total', 'status'),
+                'orders_by_status' => $ordersByStatus,
                 'sales_chart' => $chart,
                 'recent_orders' => Order::with([
                     'user' => fn ($q) => $q->select('id', 'phone', 'name', 'first_name', 'last_name')->withCount('addresses'),

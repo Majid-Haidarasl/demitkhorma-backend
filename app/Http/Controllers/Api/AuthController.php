@@ -516,7 +516,7 @@ class AuthController extends Controller
 
     private function passwordRules(bool $confirmed = false): array
     {
-        $rules = ['required', 'string', 'min:8', 'max:20'];
+        $rules = ['required', 'string', 'min:5', 'max:20'];
 
         if ($confirmed) {
             $rules[] = 'confirmed';
@@ -528,8 +528,8 @@ class AuthController extends Controller
     private function passwordMessages(): array
     {
         return [
-            'password.min' => 'رمز عبور باید بین ۸ تا ۲۰ کاراکتر باشد.',
-            'password.max' => 'رمز عبور باید بین ۸ تا ۲۰ کاراکتر باشد.',
+            'password.min' => 'رمز عبور باید بین ۵ تا ۲۰ کاراکتر باشد.',
+            'password.max' => 'رمز عبور باید بین ۵ تا ۲۰ کاراکتر باشد.',
             'password.confirmed' => 'رمز عبور و تکرار آن یکسان نیست.',
         ];
     }

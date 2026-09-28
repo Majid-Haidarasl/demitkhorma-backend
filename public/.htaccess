@@ -30,6 +30,14 @@
     Header set Referrer-Policy "strict-origin-when-cross-origin"
     Header set Permissions-Policy "camera=(), microphone=(), geolocation=()"
     Header set Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+
+    # Static media must be readable by Flutter Web / cross-origin <img>/CanvasKit
+    <FilesMatch "\.(?i:webp|jpe?g|png|gif|svg|ico|woff2?|ttf|otf|css|js)$">
+        Header always unset Content-Security-Policy
+        Header always set Access-Control-Allow-Origin "*"
+        Header always set Cross-Origin-Resource-Policy "cross-origin"
+        Header always set Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+    </FilesMatch>
 </IfModule>
 
 <FilesMatch "^\.">

@@ -31,14 +31,14 @@ class CustomerMessageController extends Controller
         ]);
 
         $channel = $data['channel'] ?? 'sms';
-        $users = $messages->recipients($data['audience'], $data['user_ids'] ?? [], $channel);
+        $preview = $messages->recipientPreview($data['audience'], $data['user_ids'] ?? [], $channel);
 
         return response()->json([
             'data' => [
-                'count' => $users->count(),
+                'count' => $preview['count'],
                 'max' => CustomerMessageService::MAX_RECIPIENTS,
                 'channel' => $channel,
-                'preview' => $users->take(40)->map(fn ($u) => [
+                'preview' => $preview['users']->map(fn ($u) => [
                     'id' => $u->id,
                     'phone' => $u->phone,
                     'email' => $u->email,

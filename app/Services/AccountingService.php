@@ -107,19 +107,42 @@ class AccountingService
 
     public function snapshotCost(OrderItem $item): void
     {
-        if ($item->cost_snapshot !== null) {
+        $this->snapshotCosts([$item]);
+    }
+
+    /**
+     * Batch-fill cost_snapshot for order lines (same rules as snapshotCost).
+     *
+     * @param  iterable<OrderItem>  $items
+     */
+    public function snapshotCosts(iterable $items): void
+    {
+        $pending = collect($items)->filter(fn (OrderItem $item) => $item->cost_snapshot === null)->values();
+        if ($pending->isEmpty()) {
             return;
         }
 
-        $cost = 0;
-        if ($item->product_variant_id) {
-            $cost = (int) (ProductVariant::where('id', $item->product_variant_id)->value('avg_cost') ?? 0);
-        }
-        if ($cost === 0 && $item->product_id) {
-            $cost = (int) (Product::where('id', $item->product_id)->value('avg_cost') ?? 0);
-        }
+        $variantIds = $pending->pluck('product_variant_id')->filter()->unique()->values();
+        $productIds = $pending->pluck('product_id')->filter()->unique()->values();
 
-        $item->update(['cost_snapshot' => $cost]);
+        $variantCosts = $variantIds->isEmpty()
+            ? collect()
+            : ProductVariant::query()->whereIn('id', $variantIds)->pluck('avg_cost', 'id');
+        $productCosts = $productIds->isEmpty()
+            ? collect()
+            : Product::query()->whereIn('id', $productIds)->pluck('avg_cost', 'id');
+
+        foreach ($pending as $item) {
+            $cost = 0;
+            if ($item->product_variant_id) {
+                $cost = (int) ($variantCosts[$item->product_variant_id] ?? 0);
+            }
+            if ($cost === 0 && $item->product_id) {
+                $cost = (int) ($productCosts[$item->product_id] ?? 0);
+            }
+
+            $item->update(['cost_snapshot' => $cost]);
+        }
     }
 
     public function summary(Carbon $from, Carbon $to): array
@@ -359,56 +382,68 @@ class AccountingService
 
     private function inventorySnapshot(): array
     {
-        $items = [];
-        $qty = 0;
-        $value = 0;
+        $variantTotals = ProductVariant::query()
+            ->selectRaw('COALESCE(SUM(stock), 0) as qty, COALESCE(SUM(stock * avg_cost), 0) as value')
+            ->first();
 
-        $products = Product::with(['variants:id,product_id,weight_grams,stock,avg_cost'])->get(['id', 'name_fa', 'stock', 'avg_cost']);
+        $productTotals = Product::query()
+            ->whereDoesntHave('variants')
+            ->selectRaw('COALESCE(SUM(stock), 0) as qty, COALESCE(SUM(stock * avg_cost), 0) as value')
+            ->first();
 
-        foreach ($products as $product) {
-            if ($product->variants->count() > 0) {
-                foreach ($product->variants as $variant) {
-                    $stock = (int) $variant->stock;
-                    $avg = (int) $variant->avg_cost;
-                    $line = $stock * $avg;
-                    $qty += $stock;
-                    $value += $line;
-                    $items[] = [
-                        'id' => $product->id.'-'.$variant->id,
-                        'product_id' => $product->id,
-                        'product_name' => $product->name_fa,
-                        'variant_id' => $variant->id,
-                        'variant_label' => $variant->weight_grams.' گرم',
-                        'stock' => $stock,
-                        'avg_cost' => $avg,
-                        'value' => $line,
-                    ];
-                }
-            } else {
-                $stock = (int) $product->stock;
-                $avg = (int) $product->avg_cost;
-                $line = $stock * $avg;
-                $qty += $stock;
-                $value += $line;
-                $items[] = [
-                    'id' => (string) $product->id,
-                    'product_id' => $product->id,
-                    'product_name' => $product->name_fa,
-                    'variant_id' => null,
-                    'variant_label' => null,
-                    'stock' => $stock,
-                    'avg_cost' => $avg,
-                    'value' => $line,
-                ];
-            }
-        }
+        $qty = (int) ($variantTotals->qty ?? 0) + (int) ($productTotals->qty ?? 0);
+        $value = (int) ($variantTotals->value ?? 0) + (int) ($productTotals->value ?? 0);
 
-        usort($items, fn ($a, $b) => $b['value'] <=> $a['value']);
+        $variantRows = ProductVariant::query()
+            ->join('products', 'products.id', '=', 'product_variants.product_id')
+            ->orderByDesc(DB::raw('product_variants.stock * product_variants.avg_cost'))
+            ->limit(20)
+            ->get([
+                'product_variants.id as variant_id',
+                'product_variants.product_id',
+                'product_variants.weight_grams',
+                'product_variants.stock',
+                'product_variants.avg_cost',
+                'products.name_fa as product_name',
+            ])
+            ->map(fn ($row) => [
+                'id' => $row->product_id.'-'.$row->variant_id,
+                'product_id' => (int) $row->product_id,
+                'product_name' => $row->product_name,
+                'variant_id' => (int) $row->variant_id,
+                'variant_label' => $row->weight_grams.' گرم',
+                'stock' => (int) $row->stock,
+                'avg_cost' => (int) $row->avg_cost,
+                'value' => (int) $row->stock * (int) $row->avg_cost,
+            ]);
+
+        $productRows = Product::query()
+            ->whereDoesntHave('variants')
+            ->orderByDesc(DB::raw('stock * avg_cost'))
+            ->limit(20)
+            ->get(['id', 'name_fa', 'stock', 'avg_cost'])
+            ->map(fn (Product $product) => [
+                'id' => (string) $product->id,
+                'product_id' => $product->id,
+                'product_name' => $product->name_fa,
+                'variant_id' => null,
+                'variant_label' => null,
+                'stock' => (int) $product->stock,
+                'avg_cost' => (int) $product->avg_cost,
+                'value' => (int) $product->stock * (int) $product->avg_cost,
+            ]);
+
+        $items = $variantRows
+            ->concat($productRows)
+            ->sortByDesc('value')
+            ->take(20)
+            ->values()
+            ->all();
 
         return [
             'qty' => $qty,
             'value' => $value,
-            'items' => array_slice($items, 0, 20),
+            'items' => $items,
         ];
     }
 }

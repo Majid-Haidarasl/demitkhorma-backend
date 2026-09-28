@@ -41,6 +41,7 @@ Route::get('/health', HealthController::class);
 
 Route::get('/categories', [CategoryController::class, 'index']);
 Route::get('/products', [ProductController::class, 'index']);
+Route::get('/products/suggest', [ProductController::class, 'suggest'])->middleware('throttle:60,1');
 Route::get('/products/{slug}', [ProductController::class, 'show']);
 Route::get('/banners', [BannerController::class, 'index']);
 Route::get('/flash-sales', [FlashSaleController::class, 'index']);

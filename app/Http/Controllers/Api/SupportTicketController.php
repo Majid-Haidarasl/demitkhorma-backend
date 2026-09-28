@@ -33,6 +33,13 @@ class SupportTicketController extends Controller
         $data = $request->validate([
             'subject' => ['required', 'string', 'min:3', 'max:160'],
             'message' => ['required', 'string', 'min:5', 'max:2000'],
+        ], [
+            'subject.required' => 'موضوع را وارد کنید.',
+            'subject.min' => 'موضوع باید حداقل ۳ کاراکتر باشد.',
+            'subject.max' => 'موضوع نباید بیشتر از ۱۶۰ کاراکتر باشد.',
+            'message.required' => 'متن پیام را وارد کنید.',
+            'message.min' => 'پیام باید حداقل ۵ کاراکتر باشد.',
+            'message.max' => 'پیام نباید بیشتر از ۲۰۰۰ کاراکتر باشد.',
         ]);
 
         $ticket = $support->create($user, $data['subject'], $data['message']);
@@ -54,6 +61,10 @@ class SupportTicketController extends Controller
         $user = $this->ownTicket($request, $ticket);
         $data = $request->validate([
             'message' => ['required', 'string', 'min:2', 'max:2000'],
+        ], [
+            'message.required' => 'متن پاسخ را وارد کنید.',
+            'message.min' => 'پاسخ باید حداقل ۲ کاراکتر باشد.',
+            'message.max' => 'پاسخ نباید بیشتر از ۲۰۰۰ کاراکتر باشد.',
         ]);
 
         $ticket = $support->reply($ticket, $user, 'customer', $data['message']);
