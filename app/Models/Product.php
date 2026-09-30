@@ -38,8 +38,13 @@ class Product extends Model
         return $this->hasMany(ProductVariant::class);
     }
 
+    public function flashSales(): HasMany
+    {
+        return $this->hasMany(FlashSale::class);
+    }
+
     public function getFinalPriceAttribute(): int
     {
-        return (int) round($this->base_price * (1 - $this->discount_percent / 100));
+        return \App\Services\ProductPricing::unitPrice($this);
     }
 }

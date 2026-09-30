@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\Wishlist;
+use App\Services\ProductPricing;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -18,6 +19,8 @@ class WishlistController extends Controller
             ->where('is_active', true)
             ->latest('wishlists.created_at')
             ->get();
+
+        ProductPricing::applyEffectiveDiscounts($products);
 
         return response()->json(['data' => $products]);
     }

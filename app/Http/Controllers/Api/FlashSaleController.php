@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\FlashSale;
+use App\Services\ProductPricing;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
 
@@ -17,6 +18,10 @@ class FlashSaleController extends Controller
             ->where('starts_at', '<=', Carbon::now())
             ->where('ends_at', '>=', Carbon::now())
             ->get();
+
+        ProductPricing::applyEffectiveDiscounts(
+            $sales->pluck('product')->filter()->values()
+        );
 
         $endsAt = $sales->min('ends_at');
 

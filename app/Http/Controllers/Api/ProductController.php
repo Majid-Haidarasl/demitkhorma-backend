@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Product;
+use App\Services\ProductPricing;
 use App\Support\SafeInput;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -40,10 +41,17 @@ class ProductController extends Controller
         }
 
         if ($request->boolean('discounted')) {
-            $query->where('discount_percent', '>', 0);
+            $flashIds = ProductPricing::activeFlashProductIds();
+            $query->where(function ($q) use ($flashIds) {
+                $q->where('discount_percent', '>', 0);
+                if ($flashIds->isNotEmpty()) {
+                    $q->orWhereIn('id', $flashIds);
+                }
+            });
         }
 
-        $products = $query->paginate($request->safePerPage( 20));
+        $products = $query->paginate($request->safePerPage(20));
+        ProductPricing::applyEffectiveDiscounts($products->getCollection());
 
         return response()->json($products);
     }
@@ -66,6 +74,8 @@ class ProductController extends Controller
             ->orderByDesc('id')
             ->limit(8)
             ->get(['id', 'name_fa', 'slug', 'base_price', 'discount_percent']);
+
+        ProductPricing::applyEffectiveDiscounts($products);
 
         $categories = Category::query()
             ->where('name_fa', 'like', "%{$term}%")
@@ -107,6 +117,8 @@ class ProductController extends Controller
             ->where('slug', $slug)
             ->where('is_active', true)
             ->firstOrFail();
+
+        ProductPricing::applyEffectiveDiscounts($product);
 
         return response()->json(['data' => $product]);
     }

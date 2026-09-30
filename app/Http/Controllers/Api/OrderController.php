@@ -5,17 +5,16 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Address;
 use App\Models\Coupon;
-use App\Models\FlashSale;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Services\ActivityLogger;
 use App\Services\OrderFulfillmentService;
 use App\Services\OtpService;
+use App\Services\ProductPricing;
 use App\Services\ZarinpalService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -91,15 +90,7 @@ class OrderController extends Controller
                 ->pluck('product_id')
                 ->flip();
 
-            $flashDiscounts = FlashSale::query()
-                ->whereIn('product_id', $productIds)
-                ->where('is_active', true)
-                ->where('is_draft', false)
-                ->where('starts_at', '<=', Carbon::now())
-                ->where('ends_at', '>=', Carbon::now())
-                ->get(['product_id', 'discount_percent'])
-                ->groupBy('product_id')
-                ->map(fn ($rows) => (int) $rows->max('discount_percent'));
+            $flashDiscounts = ProductPricing::activeFlashDiscounts($productIds);
 
             foreach ($data['items'] as $item) {
                 $product = $products->get($item['product_id']);
@@ -124,7 +115,11 @@ class OrderController extends Controller
                     ]);
                 }
 
-                $unitPrice = $this->unitPrice($product, $variant, (int) ($flashDiscounts[$product->id] ?? 0));
+                $unitPrice = ProductPricing::unitPrice(
+                    $product,
+                    $variant,
+                    (int) ($flashDiscounts[$product->id] ?? 0)
+                );
                 $stock = $variant?->stock ?? $product->stock;
 
                 if ($stock < $item['qty']) {
@@ -301,29 +296,6 @@ class OrderController extends Controller
         }
 
         $user->addresses()->create([...$payload, 'is_default' => true]);
-    }
-
-    private function unitPrice(Product $product, ?ProductVariant $variant, ?int $flashDiscount = null): int
-    {
-        $base = $variant?->price ?? $product->base_price;
-        $flash = $flashDiscount ?? $this->activeFlashDiscount($product->id);
-        $discount = max((int) $product->discount_percent, $flash);
-
-        return (int) round($base * (1 - $discount / 100));
-    }
-
-    private function activeFlashDiscount(int $productId): int
-    {
-        $sale = FlashSale::query()
-            ->where('product_id', $productId)
-            ->where('is_active', true)
-            ->where('is_draft', false)
-            ->where('starts_at', '<=', Carbon::now())
-            ->where('ends_at', '>=', Carbon::now())
-            ->orderByDesc('discount_percent')
-            ->first();
-
-        return (int) ($sale?->discount_percent ?? 0);
     }
 
     public function cancel(Request $request, Order $order, OrderFulfillmentService $fulfillment): JsonResponse

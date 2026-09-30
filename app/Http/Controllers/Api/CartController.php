@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\CartItem;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Services\ProductPricing;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +21,12 @@ class CartController extends Controller
             ->with(['product.category', 'product.images', 'product.variants', 'variant'])
             ->latest()
             ->get();
+
+        $products = $rows
+            ->pluck('product')
+            ->filter()
+            ->values();
+        ProductPricing::applyEffectiveDiscounts($products);
 
         $data = $rows
             ->filter(fn (CartItem $row) => $row->product && $row->product->is_active)
